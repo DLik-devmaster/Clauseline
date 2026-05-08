@@ -1,14 +1,15 @@
-import { chromium } from 'playwright';
+// IEC scanner — direct webstore-search-api (no Playwright)
+const IEC_API = 'https://webstore-search-api.iec.ch/api/search';
 
-const DELAY_MS = 3000;
+const DELAY_MS = 1500;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function parseHits(searchJson, baseCode) {
-  const hits = searchJson?.primary?.hits?.hits || [];
+function parseHits(json, baseCode) {
+  const hits = json?.primary?.hits?.hits || [];
   const matching = hits
     .map(h => h._source)
-    .filter(src => (src.reference || '').toUpperCase().startsWith(baseCode.toUpperCase()))
-    .filter(src => src.publication_date && src.status !== 'WITHDRAWN');
+    .filter(s => (s.reference || '').toUpperCase().startsWith(baseCode.toUpperCase()))
+    .filter(s => s.publication_date && s.status !== 'WITHDRAWN');
 
   if (matching.length === 0) return null;
 
@@ -19,86 +20,50 @@ function parseHits(searchJson, baseCode) {
   return { latestEdition, year };
 }
 
+async function searchIEC(code) {
+  const baseCode = code.replace(/:\d{4}.*/, '').trim();
+
+  const res = await fetch(IEC_API, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0',
+      'Referer': 'https://webstore.iec.ch/',
+      'Origin': 'https://webstore.iec.ch',
+    },
+    body: JSON.stringify({ query: baseCode }),
+  });
+
+  if (!res.ok) {
+    console.error(`[iec] API ${res.status} for ${baseCode}`);
+    return null;
+  }
+
+  const json = await res.json();
+  const parsed = parseHits(json, baseCode);
+
+  if (!parsed) {
+    console.log(`[iec] no match for ${baseCode}`);
+    return null;
+  }
+
+  console.log(`[iec] ${baseCode} → ${parsed.latestEdition} (${parsed.year})`);
+  return { baseCode, ...parsed };
+}
+
 export async function checkIECStandards(regulations) {
   const iecRegs = regulations.filter(r => r.body === 'IEC');
   if (iecRegs.length === 0) return {};
 
-  const browser = await chromium.launch({
-    headless: true,
-    args: [
-      '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-    ],
-  });
-
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    viewport: { width: 1920, height: 1080 },
-    locale: 'en-US',
-  });
-
-  const page = await context.newPage();
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-    window.chrome = { runtime: {} };
-  });
-  await page.route('**usercentrics**', r => r.abort());
-  await page.route('**cookiebot**', r => r.abort());
-  await page.route('**onetrust**', r => r.abort());
-
   const results = {};
-
-  try {
-    // Load homepage once
-    console.log('[iec] loading webstore...');
-    await page.goto('https://webstore.iec.ch', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(2000);
-
-    const searchInput = page.locator('input[type="search"]').first();
-
-    for (const reg of iecRegs) {
-      const baseCode = reg.code.replace(/:\d{4}.*/, '').trim();
-      console.log(`[iec] searching ${baseCode}...`);
-
-      try {
-        const responsePromise = page.waitForResponse(
-          r => r.url().includes('webstore-search-api.iec.ch/api/search') && r.status() === 200,
-          { timeout: 15000 }
-        );
-
-        await searchInput.fill(baseCode);
-        await searchInput.press('Enter');
-
-        const apiResponse = await responsePromise;
-        const searchJson = await apiResponse.json();
-        const parsed = parseHits(searchJson, baseCode);
-
-        if (!parsed) {
-          console.log(`[iec] no match for ${baseCode}`);
-        } else {
-          console.log(`[iec] ${baseCode} → ${parsed.latestEdition} (${parsed.year})`);
-          results[reg.code] = { baseCode, ...parsed };
-        }
-
-        // Navigate back to homepage for next search
-        await page.goto('https://webstore.iec.ch', { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForTimeout(1500);
-      } catch (err) {
-        console.error(`[iec] error for ${baseCode}:`, err.message);
-        // Try to recover — go back to homepage
-        try {
-          await page.goto('https://webstore.iec.ch', { waitUntil: 'domcontentloaded', timeout: 15000 });
-          await page.waitForTimeout(1500);
-        } catch { /* give up on recovery */ }
-      }
-
-      await sleep(DELAY_MS);
+  for (const reg of iecRegs) {
+    try {
+      const result = await searchIEC(reg.code);
+      if (result) results[reg.code] = result;
+    } catch (err) {
+      console.error(`[iec] error for ${reg.code}:`, err.message);
     }
-  } finally {
-    await browser.close();
+    await sleep(DELAY_MS);
   }
-
   return results;
 }
