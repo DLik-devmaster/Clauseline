@@ -11,35 +11,53 @@ function DetailPage({ reg, onBack }) {
         <span className={"status-dot " + (severity === "critical" ? "crit" : "warn")}/>{severity} gap
       </span>;
 
-  // impact summary helpers
-  const typeCount = {};
-  reg.changes.forEach(c => { typeCount[c.type] = (typeCount[c.type] || 0) + 1; });
-  const bySect = {};
-  reg.changes.forEach(c => {
-    const sect = c.clause.split('.')[0];
-    if (!bySect[sect]) bySect[sect] = [];
-    bySect[sect].push(c);
-  });
-  const impactLevels = ["high", "medium", "low"];
+  const upToDate = reg.version === reg.latestVersion;
   const impactColor = { high: "var(--crit)", medium: "var(--warn)", low: "var(--ink-3)" };
 
-  const upToDate = reg.version === reg.latestVersion;
+  const deadlineDays = { high: 14, medium: 30, low: 90 };
+  const deadlineLabel = (impact) => {
+    const d = new Date();
+    d.setDate(d.getDate() + (deadlineDays[impact] || 30));
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Per-item status (local until DB supports it)
+  const STATUS_CYCLE = ["open", "in-progress", "closed"];
+  const STATUS_STYLE = {
+    "open":        "chip",
+    "in-progress": "chip chip-review",
+    "closed":      "chip chip-ok",
+  };
+  const [itemStatus, setItemStatus] = React.useState(() =>
+    Object.fromEntries((reg.changes || []).map((_, i) => [i, "open"]))
+  );
+  const cycleStatus = (i) =>
+    setItemStatus(prev => ({
+      ...prev,
+      [i]: STATUS_CYCLE[(STATUS_CYCLE.indexOf(prev[i]) + 1) % STATUS_CYCLE.length]
+    }));
+
+  const closedCount = Object.values(itemStatus).filter(s => s === "closed").length;
+  const inProgressCount = Object.values(itemStatus).filter(s => s === "in-progress").length;
+  const openCount = reg.changes.length - closedCount - inProgressCount;
+  const progressPct = reg.changes.length > 0 ? Math.round(closedCount / reg.changes.length * 100) : 0;
+
+  // Impact breakdown
+  const typeCount = {};
+  reg.changes.forEach(c => { typeCount[c.type] = (typeCount[c.type] || 0) + 1; });
+
   const [rerunning, setRerunning] = React.useState(false);
   const [rerunDone, setRerunDone] = React.useState(false);
   const handleRerun = () => {
-    setRerunning(true);
-    setRerunDone(false);
-    setTimeout(() => {
-      setRerunning(false);
-      setRerunDone(true);
-    }, 2200);
+    setRerunning(true); setRerunDone(false);
+    setTimeout(() => { setRerunning(false); setRerunDone(true); }, 2200);
     setTimeout(() => setRerunDone(false), 5500);
   };
   const rerunLabel = rerunning
     ? React.createElement(React.Fragment, null, React.createElement(Icon, {name:"sparkle",size:13}), " Running…")
     : rerunDone
     ? React.createElement(React.Fragment, null, React.createElement(Icon, {name:"check",size:13}), " Done")
-    : React.createElement(React.Fragment, null, React.createElement(Icon, {name:"sparkle",size:13}), " Re-run");
+    : React.createElement(React.Fragment, null, React.createElement(Icon, {name:"sparkle",size:13}), " Re-run assessment");
 
   return (
     <>
@@ -47,7 +65,6 @@ function DetailPage({ reg, onBack }) {
         action={
           <>
             <button className="btn"><Icon name="doc" size={14}/> Export report</button>
-            <button className="btn btn-primary"><Icon name="check" size={14}/> Acknowledge</button>
           </>
         }
       />
@@ -56,6 +73,7 @@ function DetailPage({ reg, onBack }) {
           <Icon name="back" size={14}/> Back to dashboard
         </button>
 
+        {/* Header */}
         <div className="detail-head">
           <div>
             <div style={{display: "flex", gap: 10, alignItems: "center"}}>
@@ -72,7 +90,7 @@ function DetailPage({ reg, onBack }) {
             </div>
           </div>
           {reg.gapScore > 0 && (
-            <div style={{textAlign: "right"}}>
+            <div style={{textAlign: "right", flexShrink: 0}}>
               <div className="stat-label" style={{marginBottom: 4}}>GAP SCORE</div>
               <div style={{fontSize: 44, fontWeight: 500, letterSpacing: "-0.03em", lineHeight: 1, color: reg.gapScore >= 50 ? "var(--crit)" : "var(--warn)"}}>{reg.gapScore}</div>
               <div className="mono tc-3" style={{fontSize: 11, marginTop: 4}}>of 100</div>
@@ -80,6 +98,7 @@ function DetailPage({ reg, onBack }) {
           )}
         </div>
 
+        {/* Version spine */}
         <div className="card" style={{marginBottom: 20}}>
           <div className="card-head">
             <div>
@@ -93,145 +112,128 @@ function DetailPage({ reg, onBack }) {
           <div className="spine">
             <div className="spine-node current">
               <span className="spine-dot"/>
-              <div className="spine-ver">{reg.version}</div>
+              <div className="spine-ver">{reg.version !== "—" ? reg.version : reg.code}</div>
               <div className="spine-tag mono tc-3">Controlled</div>
-              <div style={{position: "absolute", bottom: -22, left: 18, fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--accent-fg)", background: "var(--accent)", padding: "2px 6px", borderRadius: 4}}>YOUR VERSION</div>
+              <div style={{position:"absolute",bottom:-22,left:18,fontSize:10,fontFamily:"var(--font-mono)",color:"var(--accent-fg)",background:"var(--accent)",padding:"2px 6px",borderRadius:4}}>YOUR VERSION</div>
             </div>
             {!upToDate && (
               <div className="spine-node latest">
                 <span className="spine-dot"/>
                 <div className="spine-ver">{reg.latestVersion}</div>
-                <div className="spine-tag mono tc-3">
-                  {reg.publishedUpdate !== "—" ? reg.publishedUpdate : "Published"}
-                </div>
-                <div style={{position: "absolute", bottom: -22, left: 18, fontSize: 10, fontFamily: "var(--font-mono)", color: "white", background: "var(--crit)", padding: "2px 6px", borderRadius: 4}}>LATEST</div>
+                <div className="spine-tag mono tc-3">{reg.publishedUpdate !== "—" ? reg.publishedUpdate : "Published"}</div>
+                <div style={{position:"absolute",bottom:-22,left:18,fontSize:10,fontFamily:"var(--font-mono)",color:"white",background:"var(--crit)",padding:"2px 6px",borderRadius:4}}>LATEST</div>
               </div>
             )}
             {upToDate && (
-              <div className="spine-node" style={{opacity: 0.5}}>
+              <div className="spine-node" style={{opacity:0.5}}>
                 <span className="spine-dot"/>
-                <div className="spine-ver" style={{color: "var(--ok)"}}>up to date</div>
+                <div className="spine-ver" style={{color:"var(--ok)"}}>up to date</div>
                 <div className="spine-tag mono tc-3">No gap</div>
               </div>
             )}
           </div>
-          <div style={{height: 32}}/>
+          <div style={{height:32}}/>
         </div>
 
         <div className="detail-grid">
           <div>
-            <div className="card" style={{marginBottom: 20}}>
-              <div className="card-head">
+            {/* Gap assessment */}
+            <div className="table-wrap" style={{marginBottom: 20}}>
+              <div className="table-head">
                 <div>
-                  <div className="card-title">Impact breakdown</div>
+                  <div className="card-title">Gap assessment · {reg.changes.length} item{reg.changes.length !== 1 ? "s" : ""}</div>
                   <div className="card-sub">
                     {reg.changes.length === 0
                       ? "no gaps detected"
-                      : `${reg.changes.length} change${reg.changes.length !== 1 ? "s" : ""} · by clause section`}
+                      : <span style={{display:"flex",gap:14}}>
+                          <span style={{color:"var(--ink-3)"}}>●<span style={{marginLeft:4}}>{openCount} open</span></span>
+                          {inProgressCount > 0 && <span style={{color:"var(--review)"}}>●<span style={{marginLeft:4}}>{inProgressCount} in progress</span></span>}
+                          <span style={{color:"var(--ok)"}}>✓<span style={{marginLeft:4}}>{closedCount} closed</span></span>
+                        </span>
+                    }
                   </div>
                 </div>
-                {reg.changes.length > 0 && (
-                  <div style={{display: "flex", gap: 14}}>
-                    {impactLevels.map(lvl => {
-                      const n = reg.changes.filter(c => c.impact === lvl).length;
-                      if (!n) return null;
-                      return (
-                        <div key={lvl} style={{textAlign: "center"}}>
-                          <div style={{fontSize: 22, fontWeight: 600, color: impactColor[lvl], lineHeight: 1}}>{n}</div>
-                          <div style={{fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--ink-3)", marginTop: 2, textTransform: "uppercase"}}>{lvl}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-              <div style={{padding: "12px 18px 18px"}}>
-                {reg.changes.length === 0 ? (
-                  <div style={{textAlign: "center", padding: "28px 0", color: "var(--ink-3)", fontSize: 13}}>
-                    <Icon name="check" size={20}/>
-                    <div style={{marginTop: 6}}>All clauses up to date</div>
-                  </div>
-                ) : (
-                  <>
-                    <div style={{marginBottom: 18}}>
-                      <div style={{height: 8, borderRadius: 4, display: "flex", overflow: "hidden", gap: 2}}>
-                        {[{key:"added",color:"var(--ok)"},{key:"modified",color:"var(--warn)"},{key:"removed",color:"var(--crit)"}]
-                          .filter(t => typeCount[t.key])
-                          .map(t => (
-                            <div key={t.key} style={{flex: typeCount[t.key], background: t.color, borderRadius: 4, minWidth: 4}}/>
-                          ))}
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  {reg.changes.length > 0 && (
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:80,height:4,borderRadius:99,background:"var(--surface-3)",overflow:"hidden"}}>
+                        <div style={{height:"100%",width:progressPct+"%",background:"var(--ok)",borderRadius:99,transition:"width .3s"}}/>
                       </div>
-                      <div style={{display: "flex", gap: 16, marginTop: 7}}>
-                        {[{key:"added",color:"var(--ok)"},{key:"modified",color:"var(--warn)"},{key:"removed",color:"var(--crit)"}]
-                          .filter(t => typeCount[t.key])
-                          .map(t => (
-                            <span key={t.key} style={{fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--ink-3)", display: "flex", alignItems: "center", gap: 4}}>
-                              <span style={{width: 8, height: 8, borderRadius: 2, background: t.color, display: "inline-block", flexShrink: 0}}/>
-                              {typeCount[t.key]} {t.key}
-                            </span>
-                          ))}
-                      </div>
+                      <span className="mono tc-3" style={{fontSize:11}}>{progressPct}%</span>
                     </div>
-
-                    {Object.entries(bySect).map(([sect, items]) => {
-                      const topImpact = items.some(i => i.impact === "high") ? "high" : items.some(i => i.impact === "medium") ? "medium" : "low";
-                      return (
-                        <div key={sect} style={{display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--border)"}}>
-                          <span style={{width: 8, height: 8, borderRadius: "50%", background: impactColor[topImpact], flexShrink: 0, marginTop: 4}}/>
-                          <span style={{fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)", minWidth: 38, paddingTop: 1}}>§ {sect}</span>
-                          <div style={{flex: 1, display: "flex", flexDirection: "column", gap: 4}}>
-                            {items.map((item, j) => (
-                              <div key={j} style={{display: "flex", alignItems: "center", gap: 7, fontSize: 12.5}}>
-                                <span className={"change-type " + item.type}>{item.type}</span>
-                                <span style={{color: "var(--ink-2)"}}>{item.label}</span>
-                              </div>
-                            ))}
-                          </div>
-                          <span style={{fontFamily: "var(--font-mono)", fontSize: 10.5, color: impactColor[topImpact], flexShrink: 0, paddingTop: 2}}>{topImpact}</span>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="table-wrap">
-              <div className="table-head">
-                <div>
-                  <div className="card-title">Gap assessment · {reg.changes.length} change{reg.changes.length !== 1 ? "s" : ""}</div>
-                  <div className="card-sub">synthesized from ISO, IEC, FDA public sources</div>
+                  )}
+                  <button className={"btn btn-ghost"+(rerunDone?" btn-ok":"")} style={{fontSize:12}} onClick={handleRerun} disabled={rerunning}>
+                    {rerunLabel}
+                  </button>
                 </div>
-                <button className={"btn btn-ghost" + (rerunDone ? " btn-ok" : "")} style={{fontSize: 12}} onClick={handleRerun} disabled={rerunning}>
-                  {rerunLabel}
-                </button>
               </div>
+
               {reg.changes.length === 0 ? (
-                <div style={{padding: 40, textAlign: "center", color: "var(--ink-3)"}}>
+                <div style={{padding:40,textAlign:"center",color:"var(--ink-3)"}}>
                   <Icon name="check" size={22}/>
-                  <div style={{marginTop: 8, fontSize: 13.5, color: "var(--ink)"}}>No gap detected</div>
-                  <div style={{fontSize: 12.5}}>Your controlled version matches the latest published revision.</div>
+                  <div style={{marginTop:8,fontSize:13.5,color:"var(--ink)"}}>No gap detected</div>
+                  <div style={{fontSize:12.5}}>Your controlled version matches the latest published revision.</div>
                 </div>
               ) : reg.changes.map((c, i) => (
-                <div key={i} className="change-row">
-                  <div className="change-clause">§ {c.clause}</div>
-                  <div><span className={"change-type " + c.type}>{c.type}</span></div>
-                  <div>
-                    <div style={{fontWeight: 500, fontSize: 13}}>{c.label}</div>
-                    <div className="tc-3" style={{fontSize: 12, marginTop: 2}}>Impact: <span className="mono">{c.impact}</span> · {c.impact === "high" ? "review within 14 days" : c.impact === "medium" ? "review within 30 days" : "monitor"}</div>
+                <div key={i} style={{
+                  padding:"14px 18px",
+                  borderBottom: i < reg.changes.length - 1 ? "1px solid var(--border)" : "none",
+                  background: itemStatus[i] === "closed" ? "color-mix(in oklab, var(--ok) 5%, transparent)" : "transparent",
+                  transition:"background .2s"
+                }}>
+                  {/* Row 1: clause + type + impact + deadline + status */}
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <span style={{fontFamily:"var(--font-mono)",fontSize:11.5,color:"var(--ink-3)",minWidth:42}}>§ {c.clause}</span>
+                    <span className={"change-type " + c.type}>{c.type}</span>
+                    <span style={{fontWeight:500,fontSize:13,flex:1}}>{c.label}</span>
+                    <span style={{fontFamily:"var(--font-mono)",fontSize:10.5,color:impactColor[c.impact],flexShrink:0}}>{c.impact}</span>
+                    <span className="mono tc-3" style={{fontSize:10.5,flexShrink:0}}>{deadlineLabel(c.impact)}</span>
+                    <button
+                      className={STATUS_STYLE[itemStatus[i]]}
+                      onClick={() => cycleStatus(i)}
+                      style={{cursor:"pointer",flexShrink:0,fontSize:10.5,padding:"2px 8px"}}
+                      title="Click to advance status"
+                    >
+                      {itemStatus[i]}
+                    </button>
                   </div>
+                  {/* Row 2: required action */}
+                  {c.action && (
+                    <div style={{display:"flex",gap:8,alignItems:"flex-start",paddingLeft:50}}>
+                      <Icon name="arrow" size={11} stroke={2}/>
+                      <span style={{fontSize:12,color:"var(--ink-2)",lineHeight:1.5}}>{c.action}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
+
+            {/* Source */}
+            {reg.changes.length > 0 && (
+              <div className="card" style={{marginBottom:20}}>
+                <div className="card-head"><div className="card-title">Assessment source</div></div>
+                <div style={{padding:"10px 18px 14px",display:"flex",flexDirection:"column",gap:8}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5}}>
+                    <Icon name="sparkle" size={13}/>
+                    <span style={{flex:1}}>Generated by Claude AI based on MDCG transition guidance and public amendment documents</span>
+                    <span className="chip">AI-generated</span>
+                  </div>
+                  <div style={{fontSize:11.5,color:"var(--ink-3)",fontFamily:"var(--font-mono)",paddingLeft:21}}>
+                    Verify against official {reg.body} source before closing any gaps
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div style={{display: "flex", flexDirection: "column", gap: 16}}>
+          {/* Sidebar */}
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
             <div className="card">
               <div className="card-head"><div className="card-title">Metadata</div></div>
-              <div style={{padding: "8px 18px 14px"}}>
+              <div style={{padding:"8px 18px 14px"}}>
                 <div className="facts">
-                  <div className="fact-row"><span className="fact-key">controlled</span><span className="fact-val">{reg.version}</span></div>
-                  <div className="fact-row"><span className="fact-key">latest</span><span className="fact-val" style={{color: reg.version !== reg.latestVersion ? "var(--crit)" : "inherit"}}>{reg.latestVersion}</span></div>
+                  <div className="fact-row"><span className="fact-key">controlled</span><span className="fact-val">{reg.version !== "—" ? reg.version : reg.code}</span></div>
+                  <div className="fact-row"><span className="fact-key">latest</span><span className="fact-val" style={{color:reg.version!==reg.latestVersion?"var(--crit)":"inherit"}}>{reg.latestVersion}</span></div>
                   <div className="fact-row"><span className="fact-key">body</span><span className="fact-val">{reg.body}</span></div>
                   <div className="fact-row"><span className="fact-key">category</span><span className="fact-val">{reg.category}</span></div>
                   <div className="fact-row"><span className="fact-key">last checked</span><span className="fact-val">{reg.lastChecked}</span></div>
@@ -239,20 +241,37 @@ function DetailPage({ reg, onBack }) {
               </div>
             </div>
 
-            <div className="card">
-              <div className="card-head"><div className="card-title">Sources</div></div>
-              <div style={{padding: 14, display: "flex", flexDirection: "column", gap: 8}}>
-                {[
-                  { src: "iso.org/standard", date: "Apr 02" },
-                  { src: "accessdata.fda.gov", date: "Mar 26" },
-                  { src: "webstore.iec.ch", date: "Feb 11" }
-                ].map(s => (
-                  <div key={s.src} style={{display: "flex", alignItems: "center", gap: 8, fontSize: 12}}>
-                    <Icon name="link" size={12}/>
-                    <span className="mono" style={{flex: 1}}>{s.src}</span>
-                    <span className="mono tc-3" style={{fontSize: 11}}>{s.date}</span>
+            {reg.changes.length > 0 && (
+              <div className="card">
+                <div className="card-head"><div className="card-title">Impact summary</div></div>
+                <div style={{padding:"12px 18px 16px",display:"flex",flexDirection:"column",gap:10}}>
+                  {[{key:"added",label:"New requirements",color:"var(--ok)"},{key:"modified",label:"Modified",color:"var(--warn)"},{key:"removed",label:"Withdrawn",color:"var(--crit)"}]
+                    .filter(t => typeCount[t.key])
+                    .map(t => (
+                      <div key={t.key} style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{width:8,height:8,borderRadius:2,background:t.color,flexShrink:0}}/>
+                        <span style={{fontSize:12.5,flex:1}}>{t.label}</span>
+                        <span style={{fontFamily:"var(--font-mono)",fontSize:12,fontWeight:500}}>{typeCount[t.key]}</span>
+                      </div>
+                    ))}
+                  <div style={{borderTop:"1px dashed var(--border)",paddingTop:10,display:"flex",justifyContent:"space-between",fontSize:12}}>
+                    <span className="tc-3">Estimated effort</span>
+                    <span className="mono" style={{fontWeight:500}}>
+                      {reg.changes.filter(c=>c.impact==="high").length*5 + reg.changes.filter(c=>c.impact==="medium").length*2 + reg.changes.filter(c=>c.impact==="low").length} hrs
+                    </span>
                   </div>
-                ))}
+                </div>
+              </div>
+            )}
+
+            <div className="card">
+              <div className="card-head"><div className="card-title">Deadlines</div></div>
+              <div style={{padding:"8px 18px 14px"}}>
+                <div className="facts">
+                  <div className="fact-row"><span className="fact-key mono" style={{color:"var(--crit)"}}>high</span><span className="fact-val">14 days</span></div>
+                  <div className="fact-row"><span className="fact-key mono" style={{color:"var(--warn)"}}>medium</span><span className="fact-val">30 days</span></div>
+                  <div className="fact-row"><span className="fact-key mono" style={{color:"var(--ink-3)"}}>low</span><span className="fact-val">90 days</span></div>
+                </div>
               </div>
             </div>
           </div>
