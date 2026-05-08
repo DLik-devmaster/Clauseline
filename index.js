@@ -58,6 +58,26 @@ app.post('/api/regulations', async (req, res) => {
   }
 });
 
+app.patch('/api/regulations/:id/changes/:idx/status', async (req, res) => {
+  const { status } = req.body;
+  const { id } = req.params;
+  const idx = parseInt(req.params.idx);
+  if (!['open', 'in-progress', 'closed'].includes(status))
+    return res.status(400).json({ error: 'invalid status' });
+  try {
+    const { rows } = await pool.query(`SELECT changes FROM regulations WHERE id=$1`, [id]);
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    const changes = rows[0].changes || [];
+    if (idx < 0 || idx >= changes.length)
+      return res.status(400).json({ error: 'index out of range' });
+    changes[idx] = { ...changes[idx], status };
+    await pool.query(`UPDATE regulations SET changes=$1 WHERE id=$2`, [JSON.stringify(changes), id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/api/regulations/:id', async (req, res) => {
   try {
     await pool.query(`DELETE FROM regulations WHERE id=$1`, [req.params.id]);

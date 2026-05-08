@@ -224,6 +224,16 @@ function App() {
     setRoute("dashboard");
   };
 
+  const updateGapStatus = (regId, idx, status) => {
+    const patch = (r) => {
+      const changes = [...r.changes];
+      changes[idx] = { ...changes[idx], status };
+      return { ...r, changes };
+    };
+    setRegs(prev => prev.map(r => r.id === regId ? patch(r) : r));
+    setCurrentReg(prev => prev?.id === regId ? patch(prev) : prev);
+  };
+
   const acknowledgeAlert = async (id) => {
     try {
       await fetch(`${API_BASE}/alerts/${id}/acknowledge`, { method: 'PATCH' });
@@ -277,7 +287,7 @@ function App() {
         {route === "upload" && <UploadPage onImport={addRegs}/>}
         {route === "alerts" && <AlertsPage alerts={alerts} onOpenReg={openRegById} onAcknowledge={acknowledgeAlert} onAcknowledgeAll={acknowledgeAll}/>}
         {route === "settings" && <SettingsPage/>}
-        {route === "detail" && <DetailPage reg={currentReg} onBack={() => setRoute("dashboard")}/>}
+        {route === "detail" && <DetailPage reg={currentReg} onBack={() => setRoute("dashboard")} onStatusChange={updateGapStatus}/>}
       </main>
       {tweaksOpen && <TweaksPanel state={tweaks} setState={setTweaks} onClose={() => setTweaksOpen(false)}/>}
       {searchOpen && <SearchPalette onClose={() => setSearchOpen(false)} onOpen={openReg}/>}

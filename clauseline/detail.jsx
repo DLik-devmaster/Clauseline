@@ -1,5 +1,5 @@
 // Regulation detail page — version spine, clause map (novel), change log
-function DetailPage({ reg, onBack }) {
+function DetailPage({ reg, onBack, onStatusChange }) {
   if (!reg) return null;
 
   const severity = reg.severity;
@@ -29,13 +29,18 @@ function DetailPage({ reg, onBack }) {
     "closed":      "chip chip-ok",
   };
   const [itemStatus, setItemStatus] = React.useState(() =>
-    Object.fromEntries((reg.changes || []).map((_, i) => [i, "open"]))
+    Object.fromEntries((reg.changes || []).map((c, i) => [i, c.status || "open"]))
   );
-  const cycleStatus = (i) =>
-    setItemStatus(prev => ({
-      ...prev,
-      [i]: STATUS_CYCLE[(STATUS_CYCLE.indexOf(prev[i]) + 1) % STATUS_CYCLE.length]
-    }));
+  const cycleStatus = (i) => {
+    const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(itemStatus[i]) + 1) % STATUS_CYCLE.length];
+    setItemStatus(prev => ({ ...prev, [i]: next }));
+    fetch(`/api/regulations/${reg.id}/changes/${i}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: next }),
+    }).catch(() => {});
+    onStatusChange?.(reg.id, i, next);
+  };
 
   const closedCount = Object.values(itemStatus).filter(s => s === "closed").length;
   const inProgressCount = Object.values(itemStatus).filter(s => s === "in-progress").length;
