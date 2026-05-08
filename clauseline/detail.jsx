@@ -51,6 +51,7 @@ function DetailPage({ reg, onBack, onStatusChange, onAssessmentUpdate }) {
 
   // Export report
   const handleExport = () => {
+    try {
     const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     const impactColors = { high: '#dc2626', medium: '#d97706', low: '#6b7280' };
     const typeColors   = { added: '#16a34a', modified: '#d97706', removed: '#dc2626' };
@@ -146,12 +147,22 @@ function DetailPage({ reg, onBack, onStatusChange, onAssessmentUpdate }) {
   <span>Clauseline · AI-generated assessment — verify against official ${reg.body} sources before closing gaps</span>
   <span>${date}</span>
 </div>
-<script>window.onload = () => window.print();</script>
+<script>window.onload=()=>window.print();</script>
 </body></html>`;
 
-    const w = window.open('', '_blank');
-    w.document.write(html);
-    w.document.close();
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const tab  = window.open(url, '_blank');
+    if (!tab) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${reg.code.replace(/[^a-zA-Z0-9]/g, '-')}-gap-assessment.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch(err) { alert('Export error: ' + err.message); }
   };
 
   // Re-run assessment
