@@ -174,6 +174,14 @@ async function start() {
 
   app.listen(PORT, () => {
     console.log(`[server] listening on http://localhost:${PORT}`);
+    // Keep-alive: ping self every 14 min to prevent Render free tier sleep
+    if (process.env.NODE_ENV === 'production') {
+      const selfUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+      setInterval(() => {
+        fetch(`${selfUrl}/api/health`).catch(() => {});
+      }, 14 * 60 * 1000);
+      console.log('[keep-alive] pinging', selfUrl, 'every 14 min');
+    }
   });
 }
 
