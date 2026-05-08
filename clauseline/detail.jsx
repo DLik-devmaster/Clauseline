@@ -1,5 +1,5 @@
-// Regulation detail page — version spine, clause map (novel), change log
-function DetailPage({ reg, onBack, onStatusChange }) {
+// Regulation detail page — version spine, gap assessment, change log
+function DetailPage({ reg, onBack, onStatusChange, onAssessmentUpdate }) {
   if (!reg) return null;
 
   const severity = reg.severity;
@@ -13,7 +13,6 @@ function DetailPage({ reg, onBack, onStatusChange }) {
 
   const upToDate = reg.version === reg.latestVersion;
   const impactColor = { high: "var(--crit)", medium: "var(--warn)", low: "var(--ink-3)" };
-
   const deadlineDays = { high: 14, medium: 30, low: 90 };
   const deadlineLabel = (impact) => {
     const d = new Date();
@@ -21,13 +20,13 @@ function DetailPage({ reg, onBack, onStatusChange }) {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  // Per-item status (local until DB supports it)
+  // Local state for changes (can be replaced by fresh assessment)
+  const [changes, setChanges] = React.useState(reg.changes || []);
+  const [gapScore, setGapScore] = React.useState(reg.gapScore || 0);
+
+  // Per-item status — persisted to DB
   const STATUS_CYCLE = ["open", "in-progress", "closed"];
-  const STATUS_STYLE = {
-    "open":        "chip",
-    "in-progress": "chip chip-review",
-    "closed":      "chip chip-ok",
-  };
+  const STATUS_STYLE = { "open": "chip", "in-progress": "chip chip-review", "closed": "chip chip-ok" };
   const [itemStatus, setItemStatus] = React.useState(() =>
     Object.fromEntries((reg.changes || []).map((c, i) => [i, c.status || "open"]))
   );
@@ -42,24 +41,44 @@ function DetailPage({ reg, onBack, onStatusChange }) {
     onStatusChange?.(reg.id, i, next);
   };
 
-  const closedCount = Object.values(itemStatus).filter(s => s === "closed").length;
+  const closedCount     = Object.values(itemStatus).filter(s => s === "closed").length;
   const inProgressCount = Object.values(itemStatus).filter(s => s === "in-progress").length;
-  const openCount = reg.changes.length - closedCount - inProgressCount;
-  const progressPct = reg.changes.length > 0 ? Math.round(closedCount / reg.changes.length * 100) : 0;
+  const openCount       = changes.length - closedCount - inProgressCount;
+  const progressPct     = changes.length > 0 ? Math.round(closedCount / changes.length * 100) : 0;
 
-  // Impact breakdown
   const typeCount = {};
-  reg.changes.forEach(c => { typeCount[c.type] = (typeCount[c.type] || 0) + 1; });
+  changes.forEach(c => { typeCount[c.type] = (typeCount[c.type] || 0) + 1; });
 
+  // Re-run assessment
   const [rerunning, setRerunning] = React.useState(false);
   const [rerunDone, setRerunDone] = React.useState(false);
-  const handleRerun = () => {
-    setRerunning(true); setRerunDone(false);
-    setTimeout(() => { setRerunning(false); setRerunDone(true); }, 2200);
-    setTimeout(() => setRerunDone(false), 5500);
+  const [rerunError, setRerunError] = React.useState(null);
+
+  const handleRerun = async () => {
+    setRerunning(true); setRerunDone(false); setRerunError(null);
+    try {
+      const res = await fetch(`/api/regulations/${reg.id}/assess`, { method: 'POST' });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({}));
+        throw new Error(error || `HTTP ${res.status}`);
+      }
+      const { changes: newChanges, gap_score: newScore } = await res.json();
+      setChanges(newChanges);
+      setGapScore(newScore);
+      setItemStatus(Object.fromEntries(newChanges.map((c, i) => [i, c.status || "open"])));
+      onAssessmentUpdate?.(reg.id, newChanges, newScore);
+      setRerunDone(true);
+      setTimeout(() => setRerunDone(false), 4000);
+    } catch (err) {
+      setRerunError(err.message);
+      setTimeout(() => setRerunError(null), 6000);
+    } finally {
+      setRerunning(false);
+    }
   };
+
   const rerunLabel = rerunning
-    ? React.createElement(React.Fragment, null, React.createElement(Icon, {name:"sparkle",size:13}), " Running…")
+    ? React.createElement(React.Fragment, null, React.createElement(Icon, {name:"sparkle",size:13}), " Generating…")
     : rerunDone
     ? React.createElement(React.Fragment, null, React.createElement(Icon, {name:"check",size:13}), " Done")
     : React.createElement(React.Fragment, null, React.createElement(Icon, {name:"sparkle",size:13}), " Re-run assessment");
@@ -67,11 +86,7 @@ function DetailPage({ reg, onBack, onStatusChange }) {
   return (
     <>
       <Topbar title="Regulations" subtitle=" "
-        action={
-          <>
-            <button className="btn"><Icon name="doc" size={14}/> Export report</button>
-          </>
-        }
+        action={<button className="btn"><Icon name="doc" size={14}/> Export report</button>}
       />
       <div className="page">
         <button className="btn btn-ghost" onClick={onBack} style={{marginBottom: 4, paddingLeft: 0}}>
@@ -94,10 +109,10 @@ function DetailPage({ reg, onBack, onStatusChange }) {
               <span>Latest update {reg.publishedUpdate}</span>
             </div>
           </div>
-          {reg.gapScore > 0 && (
+          {gapScore > 0 && (
             <div style={{textAlign: "right", flexShrink: 0}}>
               <div className="stat-label" style={{marginBottom: 4}}>GAP SCORE</div>
-              <div style={{fontSize: 44, fontWeight: 500, letterSpacing: "-0.03em", lineHeight: 1, color: reg.gapScore >= 50 ? "var(--crit)" : "var(--warn)"}}>{reg.gapScore}</div>
+              <div style={{fontSize: 44, fontWeight: 500, letterSpacing: "-0.03em", lineHeight: 1, color: gapScore >= 50 ? "var(--crit)" : "var(--warn)"}}>{gapScore}</div>
               <div className="mono tc-3" style={{fontSize: 11, marginTop: 4}}>of 100</div>
             </div>
           )}
@@ -146,9 +161,9 @@ function DetailPage({ reg, onBack, onStatusChange }) {
             <div className="table-wrap" style={{marginBottom: 20}}>
               <div className="table-head">
                 <div>
-                  <div className="card-title">Gap assessment · {reg.changes.length} item{reg.changes.length !== 1 ? "s" : ""}</div>
+                  <div className="card-title">Gap assessment · {changes.length} item{changes.length !== 1 ? "s" : ""}</div>
                   <div className="card-sub">
-                    {reg.changes.length === 0
+                    {changes.length === 0
                       ? "no gaps detected"
                       : <span style={{display:"flex",gap:14}}>
                           <span style={{color:"var(--ink-3)"}}>●<span style={{marginLeft:4}}>{openCount} open</span></span>
@@ -159,7 +174,12 @@ function DetailPage({ reg, onBack, onStatusChange }) {
                   </div>
                 </div>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  {reg.changes.length > 0 && (
+                  {rerunError && (
+                    <span style={{fontSize:11,color:"var(--crit)",fontFamily:"var(--font-mono)"}}>
+                      {rerunError.slice(0, 60)}
+                    </span>
+                  )}
+                  {changes.length > 0 && (
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       <div style={{width:80,height:4,borderRadius:99,background:"var(--surface-3)",overflow:"hidden"}}>
                         <div style={{height:"100%",width:progressPct+"%",background:"var(--ok)",borderRadius:99,transition:"width .3s"}}/>
@@ -173,20 +193,28 @@ function DetailPage({ reg, onBack, onStatusChange }) {
                 </div>
               </div>
 
-              {reg.changes.length === 0 ? (
+              {rerunning && (
+                <div style={{padding:"20px 18px",display:"flex",alignItems:"center",gap:10,color:"var(--ink-3)",fontSize:12.5}}>
+                  <div className="scan-dot scan-dot-active" style={{width:8,height:8,borderRadius:"50%",flexShrink:0}}/>
+                  Asking Claude AI to analyse {reg.code} {reg.version} → {reg.latestVersion}…
+                </div>
+              )}
+
+              {!rerunning && changes.length === 0 && (
                 <div style={{padding:40,textAlign:"center",color:"var(--ink-3)"}}>
                   <Icon name="check" size={22}/>
                   <div style={{marginTop:8,fontSize:13.5,color:"var(--ink)"}}>No gap detected</div>
                   <div style={{fontSize:12.5}}>Your controlled version matches the latest published revision.</div>
                 </div>
-              ) : reg.changes.map((c, i) => (
+              )}
+
+              {!rerunning && changes.map((c, i) => (
                 <div key={i} style={{
                   padding:"14px 18px",
-                  borderBottom: i < reg.changes.length - 1 ? "1px solid var(--border)" : "none",
+                  borderBottom: i < changes.length - 1 ? "1px solid var(--border)" : "none",
                   background: itemStatus[i] === "closed" ? "color-mix(in oklab, var(--ok) 5%, transparent)" : "transparent",
                   transition:"background .2s"
                 }}>
-                  {/* Row 1: clause + type + impact + deadline + status */}
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                     <span style={{fontFamily:"var(--font-mono)",fontSize:11.5,color:"var(--ink-3)",minWidth:42}}>§ {c.clause}</span>
                     <span className={"change-type " + c.type}>{c.type}</span>
@@ -202,7 +230,6 @@ function DetailPage({ reg, onBack, onStatusChange }) {
                       {itemStatus[i]}
                     </button>
                   </div>
-                  {/* Row 2: required action */}
                   {c.action && (
                     <div style={{display:"flex",gap:8,alignItems:"flex-start",paddingLeft:50}}>
                       <Icon name="arrow" size={11} stroke={2}/>
@@ -214,13 +241,13 @@ function DetailPage({ reg, onBack, onStatusChange }) {
             </div>
 
             {/* Source */}
-            {reg.changes.length > 0 && (
+            {changes.length > 0 && (
               <div className="card" style={{marginBottom:20}}>
                 <div className="card-head"><div className="card-title">Assessment source</div></div>
                 <div style={{padding:"10px 18px 14px",display:"flex",flexDirection:"column",gap:8}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5}}>
                     <Icon name="sparkle" size={13}/>
-                    <span style={{flex:1}}>Generated by Claude AI based on MDCG transition guidance and public amendment documents</span>
+                    <span style={{flex:1}}>Generated by Claude AI · {reg.body} {reg.code}</span>
                     <span className="chip">AI-generated</span>
                   </div>
                   <div style={{fontSize:11.5,color:"var(--ink-3)",fontFamily:"var(--font-mono)",paddingLeft:21}}>
@@ -246,7 +273,7 @@ function DetailPage({ reg, onBack, onStatusChange }) {
               </div>
             </div>
 
-            {reg.changes.length > 0 && (
+            {changes.length > 0 && (
               <div className="card">
                 <div className="card-head"><div className="card-title">Impact summary</div></div>
                 <div style={{padding:"12px 18px 16px",display:"flex",flexDirection:"column",gap:10}}>
@@ -262,7 +289,7 @@ function DetailPage({ reg, onBack, onStatusChange }) {
                   <div style={{borderTop:"1px dashed var(--border)",paddingTop:10,display:"flex",justifyContent:"space-between",fontSize:12}}>
                     <span className="tc-3">Estimated effort</span>
                     <span className="mono" style={{fontWeight:500}}>
-                      {reg.changes.filter(c=>c.impact==="high").length*5 + reg.changes.filter(c=>c.impact==="medium").length*2 + reg.changes.filter(c=>c.impact==="low").length} hrs
+                      {changes.filter(c=>c.impact==="high").length*5 + changes.filter(c=>c.impact==="medium").length*2 + changes.filter(c=>c.impact==="low").length} hrs
                     </span>
                   </div>
                 </div>

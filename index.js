@@ -149,6 +149,101 @@ app.delete('/api/alerts/:id', async (req, res) => {
   }
 });
 
+// ── Gap Assessment via Claude AI ──────────────────────────────
+
+function calcGapScore(changes) {
+  const raw = changes.reduce((s, c) =>
+    s + (c.impact === 'high' ? 20 : c.impact === 'medium' ? 10 : 5), 0);
+  return Math.min(raw, 100);
+}
+
+async function generateGapAssessment(reg) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
+
+  const isUpToDate = reg.status === 'up-to-date' || reg.version === reg.latest_version;
+  const versionNote = isUpToDate
+    ? `This regulation is currently up-to-date (version ${reg.version}). Identify key ongoing compliance obligations.`
+    : `Assess the gap from version ${reg.version} to the new version ${reg.latest_version}.`;
+
+  const prompt = `You are a regulatory compliance expert for medical device manufacturers (ISO 13485, EU MDR, FDA QMSR context).
+
+Regulation: ${reg.code} — ${reg.title}
+Issuing body: ${reg.body}
+Category: ${reg.category || 'General'}
+Controlled version: ${reg.version}
+Latest version: ${reg.latest_version}
+${versionNote}
+
+Return ONLY a JSON array (no markdown fences, no explanation) of 3-6 gap items:
+[
+  {
+    "clause": "<clause or section, e.g. 4.1 or Annex I>",
+    "type": "<added|modified|removed>",
+    "impact": "<high|medium|low>",
+    "label": "<concise change description, max 80 chars>",
+    "action": "<specific QMS action required, max 120 chars>"
+  }
+]`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Claude API ${res.status}: ${msg.slice(0, 200)}`);
+  }
+
+  const json = await res.json();
+  const text = json.content?.[0]?.text || '';
+  const match = text.match(/\[[\s\S]*\]/);
+  if (!match) throw new Error('Claude response contained no JSON array');
+
+  const raw = JSON.parse(match[0]);
+  return raw.map(c => ({
+    clause: String(c.clause || ''),
+    type: ['added', 'modified', 'removed'].includes(c.type) ? c.type : 'modified',
+    impact: ['high', 'medium', 'low'].includes(c.impact) ? c.impact : 'medium',
+    label: String(c.label || '').slice(0, 120),
+    action: String(c.action || '').slice(0, 180),
+  }));
+}
+
+app.post('/api/regulations/:id/assess', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query(`SELECT * FROM regulations WHERE id=$1`, [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Regulation not found' });
+    const reg = rows[0];
+
+    console.log(`[assess] generating GA for ${reg.code}…`);
+    const changes = await generateGapAssessment(reg);
+    const gapScore = calcGapScore(changes);
+
+    await pool.query(
+      `UPDATE regulations SET changes=$1, gap_score=$2 WHERE id=$3`,
+      [JSON.stringify(changes), gapScore, id]
+    );
+
+    console.log(`[assess] ${reg.code}: ${changes.length} items, score ${gapScore}`);
+    res.json({ changes, gap_score: gapScore });
+  } catch (err) {
+    console.error('[assess]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Scan ──────────────────────────────────────────────────────
 
 let scanRunning = false;
