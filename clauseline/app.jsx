@@ -9,9 +9,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const FORCE_SIGNUP = false;
 
 // When served from Express (localhost:3001) use relative path; otherwise full URL
-const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? '/api'
-  : 'http://localhost:3001/api';
+const API_BASE = '/api';
 
 function dbRowToReg(row) {
   return {
