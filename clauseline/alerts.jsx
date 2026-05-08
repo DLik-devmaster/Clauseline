@@ -1,5 +1,5 @@
 // Alerts page — timeline feed
-function AlertsPage({ alerts, onOpenReg }) {
+function AlertsPage({ alerts, onOpenReg, onAcknowledge, onAcknowledgeAll }) {
   const [filter, setFilter] = React.useState("all");
   const active = alerts.filter(a => !a.acknowledged);
   const filtered = filter === "all" ? active : active.filter(a => a.severity === filter);
@@ -16,7 +16,7 @@ function AlertsPage({ alerts, onOpenReg }) {
       <Topbar title="Alerts" subtitle="Regulatory signals feed"
         action={
           <>
-            <button className="btn btn-ghost">Mark all read</button>
+            <button className="btn btn-ghost" onClick={onAcknowledgeAll} disabled={active.length === 0}>Mark all read</button>
             <button className="btn"><Icon name="settings" size={14}/> Preferences</button>
           </>
         }
@@ -51,7 +51,7 @@ function AlertsPage({ alerts, onOpenReg }) {
                 <div className="alert-body">{a.body}</div>
                 <div className="alert-actions">
                   <button className="btn" onClick={() => onOpenReg(a.regId)}>View regulation <Icon name="arrow" size={12}/></button>
-                  <button className="btn btn-ghost">Acknowledge</button>
+                  <button className="btn btn-ghost" onClick={() => onAcknowledge(a.id)}>Acknowledge</button>
                 </div>
               </div>
             </div>

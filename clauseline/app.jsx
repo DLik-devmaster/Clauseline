@@ -224,6 +224,23 @@ function App() {
     setRoute("dashboard");
   };
 
+  const acknowledgeAlert = async (id) => {
+    try {
+      await fetch(`${API_BASE}/alerts/${id}/acknowledge`, { method: 'PATCH' });
+      setAlerts(prev => prev.map(a => a.id === id ? { ...a, acknowledged: true } : a));
+    } catch (err) {
+      console.error('[app] acknowledge failed:', err.message);
+    }
+  };
+
+  const acknowledgeAll = async () => {
+    const active = alerts.filter(a => !a.acknowledged);
+    await Promise.all(active.map(a =>
+      fetch(`${API_BASE}/alerts/${a.id}/acknowledge`, { method: 'PATCH' }).catch(() => {})
+    ));
+    setAlerts(prev => prev.map(a => ({ ...a, acknowledged: true })));
+  };
+
   if (route === "signup") {
     return <SignupPage onComplete={() => setRoute("dashboard")}/>;
   }
@@ -258,7 +275,7 @@ function App() {
           </>
         )}
         {route === "upload" && <UploadPage onImport={addRegs}/>}
-        {route === "alerts" && <AlertsPage alerts={alerts} onOpenReg={openRegById}/>}
+        {route === "alerts" && <AlertsPage alerts={alerts} onOpenReg={openRegById} onAcknowledge={acknowledgeAlert} onAcknowledgeAll={acknowledgeAll}/>}
         {route === "settings" && <SettingsPage/>}
         {route === "detail" && <DetailPage reg={currentReg} onBack={() => setRoute("dashboard")}/>}
       </main>
