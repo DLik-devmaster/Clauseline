@@ -49,6 +49,111 @@ function DetailPage({ reg, onBack, onStatusChange, onAssessmentUpdate }) {
   const typeCount = {};
   changes.forEach(c => { typeCount[c.type] = (typeCount[c.type] || 0) + 1; });
 
+  // Export report
+  const handleExport = () => {
+    const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    const impactColors = { high: '#dc2626', medium: '#d97706', low: '#6b7280' };
+    const typeColors   = { added: '#16a34a', modified: '#d97706', removed: '#dc2626' };
+    const statusLabels = { open: 'Open', 'in-progress': 'In Progress', closed: 'Closed' };
+
+    const rows = changes.map((c, i) => `
+      <tr class="${itemStatus[i] === 'closed' ? 'row-closed' : ''}">
+        <td class="mono">${c.clause}</td>
+        <td><span class="type-chip" style="background:${typeColors[c.type]}20;color:${typeColors[c.type]}">${c.type}</span></td>
+        <td style="color:${impactColors[c.impact]};font-family:monospace;font-size:11px">${c.impact}</td>
+        <td><strong>${c.label}</strong>${c.action ? `<br/><span class="action">${c.action}</span>` : ''}</td>
+        <td><span class="status-badge status-${itemStatus[i]}">${statusLabels[itemStatus[i]]}</span></td>
+      </tr>`).join('');
+
+    const effortHrs = changes.filter(c=>c.impact==='high').length*5 +
+                      changes.filter(c=>c.impact==='medium').length*2 +
+                      changes.filter(c=>c.impact==='low').length;
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Gap Assessment — ${reg.code}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 12px; color: #111; padding: 32px 40px; max-width: 900px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #111; }
+  .brand { font-size: 11px; font-family: monospace; color: #666; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
+  .meta { font-size: 11px; color: #555; margin-top: 4px; }
+  .score-box { text-align: right; }
+  .score-num { font-size: 40px; font-weight: 600; line-height: 1; color: ${gapScore >= 50 ? '#dc2626' : '#d97706'}; }
+  .score-label { font-size: 10px; font-family: monospace; color: #888; text-transform: uppercase; letter-spacing: .06em; }
+  .section { margin-bottom: 24px; }
+  .section-title { font-size: 10px; font-family: monospace; text-transform: uppercase; letter-spacing: .08em; color: #888; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #e5e7eb; }
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .fact { }
+  .fact-key { font-size: 10px; font-family: monospace; color: #888; text-transform: uppercase; display: block; margin-bottom: 2px; }
+  .fact-val { font-size: 12px; font-weight: 500; }
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  th { text-align: left; padding: 7px 10px; background: #f9fafb; font-size: 10px; font-family: monospace; text-transform: uppercase; letter-spacing: .06em; color: #666; border-bottom: 1px solid #e5e7eb; }
+  td { padding: 10px 10px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  tr.row-closed td { color: #9ca3af; }
+  .mono { font-family: monospace; font-size: 11px; }
+  .type-chip { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-weight: 500; }
+  .action { display: block; margin-top: 4px; color: #555; font-size: 11px; line-height: 1.5; }
+  .status-badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; font-family: monospace; }
+  .status-open        { background: #f3f4f6; color: #374151; }
+  .status-in-progress { background: #fef3c7; color: #92400e; }
+  .status-closed      { background: #dcfce7; color: #166534; }
+  .summary { display: flex; gap: 24px; margin-top: 20px; padding: 14px 16px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; }
+  .sum-item { }
+  .sum-label { font-size: 10px; font-family: monospace; color: #888; text-transform: uppercase; }
+  .sum-val { font-size: 16px; font-weight: 600; margin-top: 2px; }
+  .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 10px; color: #9ca3af; display: flex; justify-content: space-between; font-family: monospace; }
+  @media print { body { padding: 20px 24px; } }
+</style></head><body>
+<div class="header">
+  <div>
+    <div class="brand">Clauseline · Gap Assessment Report</div>
+    <h1>${reg.code} — ${reg.title}</h1>
+    <div class="meta">${reg.body} · ${reg.category} · Generated ${date}</div>
+  </div>
+  ${gapScore > 0 ? `<div class="score-box"><div class="score-label">Gap Score</div><div class="score-num">${gapScore}</div><div class="score-label">of 100</div></div>` : ''}
+</div>
+
+<div class="section">
+  <div class="section-title">Version status</div>
+  <div class="facts">
+    <div class="fact"><span class="fact-key">Controlled version</span><span class="fact-val">${reg.version !== '—' ? reg.version : reg.code}</span></div>
+    <div class="fact"><span class="fact-key">Latest version</span><span class="fact-val" style="color:${reg.version!==reg.latestVersion?'#dc2626':'inherit'}">${reg.latestVersion}</span></div>
+    <div class="fact"><span class="fact-key">Status</span><span class="fact-val">${reg.status}</span></div>
+    <div class="fact"><span class="fact-key">Last checked</span><span class="fact-val">${reg.lastChecked}</span></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Gap assessment · ${changes.length} item${changes.length !== 1 ? 's' : ''}</div>
+  ${changes.length === 0
+    ? '<p style="color:#888;font-size:12px">No gaps detected — controlled version matches latest published revision.</p>'
+    : `<table>
+        <thead><tr><th>Clause</th><th>Type</th><th>Impact</th><th>Description & Required Action</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="summary">
+        <div class="sum-item"><div class="sum-label">Open</div><div class="sum-val">${openCount}</div></div>
+        <div class="sum-item"><div class="sum-label">In Progress</div><div class="sum-val">${inProgressCount}</div></div>
+        <div class="sum-item"><div class="sum-label">Closed</div><div class="sum-val">${closedCount}</div></div>
+        <div class="sum-item"><div class="sum-label">Progress</div><div class="sum-val">${progressPct}%</div></div>
+        <div class="sum-item"><div class="sum-label">Est. Effort</div><div class="sum-val">${effortHrs} hrs</div></div>
+      </div>`
+  }
+</div>
+
+<div class="footer">
+  <span>Clauseline · AI-generated assessment — verify against official ${reg.body} sources before closing gaps</span>
+  <span>${date}</span>
+</div>
+<script>window.onload = () => window.print();</script>
+</body></html>`;
+
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+  };
+
   // Re-run assessment
   const [rerunning, setRerunning] = React.useState(false);
   const [rerunDone, setRerunDone] = React.useState(false);
@@ -86,7 +191,7 @@ function DetailPage({ reg, onBack, onStatusChange, onAssessmentUpdate }) {
   return (
     <>
       <Topbar title="Regulations" subtitle=" "
-        action={<button className="btn"><Icon name="doc" size={14}/> Export report</button>}
+        action={<button className="btn" onClick={handleExport}><Icon name="doc" size={14}/> Export report</button>}
       />
       <div className="page">
         <button className="btn btn-ghost" onClick={onBack} style={{marginBottom: 4, paddingLeft: 0}}>
