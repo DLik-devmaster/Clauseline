@@ -87,6 +87,20 @@ app.delete('/api/regulations/:id', async (req, res) => {
   }
 });
 
+// Reset gap assessment for a regulation (clears changes and gap_score)
+app.post('/api/regulations/:id/reset-assessment', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE regulations SET changes='[]', gap_score=0 WHERE id=$1 RETURNING id, code, gap_score`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true, ...rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Alerts ────────────────────────────────────────────────────
 
 app.get('/api/alerts', async (req, res) => {
@@ -227,9 +241,12 @@ app.post('/api/regulations/:id/assess', async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'Regulation not found' });
     const reg = rows[0];
 
+    const isUpToDate = reg.version === reg.latest_version;
+
     console.log(`[assess] generating GA for ${reg.code}…`);
     const changes = await generateGapAssessment(reg);
-    const gapScore = calcGapScore(changes);
+    // Up-to-date regulations cannot have a gap score — items are compliance reminders only
+    const gapScore = isUpToDate ? 0 : calcGapScore(changes);
 
     await pool.query(
       `UPDATE regulations SET changes=$1, gap_score=$2 WHERE id=$3`,
