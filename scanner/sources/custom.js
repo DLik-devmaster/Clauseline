@@ -37,22 +37,22 @@ async function fetchSourceUrl(url) {
   }
 }
 
+// Uses serper.dev (2500 free queries on signup, no CX needed)
 async function searchGoogle(query) {
-  const key = process.env.GOOGLE_CSE_KEY;
-  const cx  = process.env.GOOGLE_CSE_CX;
-  if (!key || !cx) return null;
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return null;
 
   try {
-    const res = await axios.get('https://www.googleapis.com/customsearch/v1', {
-      params: { key, cx, q: query, num: 5 },
+    const res = await axios.post('https://google.serper.dev/search', { q: query, num: 5 }, {
+      headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
       timeout: 10000,
     });
-    const items = res.data.items || [];
-    const text = items.map(i => `${i.title} ${i.snippet}`).join(' ');
+    const items = [...(res.data.organic || []), ...(res.data.knowledgeGraph ? [res.data.knowledgeGraph] : [])];
+    const text = items.map(i => `${i.title || ''} ${i.snippet || ''}`).join(' ');
     const years = extractYears(text);
     return maxYearStr(years);
   } catch (err) {
-    console.warn(`[custom] Google CSE query "${query}" failed: ${err.message}`);
+    console.warn(`[custom] Serper query "${query}" failed: ${err.message}`);
     return null;
   }
 }
