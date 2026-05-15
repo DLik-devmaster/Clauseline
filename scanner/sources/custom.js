@@ -1,13 +1,46 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-function extractYears(text) {
-  return [...text.matchAll(/\b(20\d{2})\b/g)]
-    .map(m => parseInt(m[1]))
-    .filter(y => y >= 2000 && y <= new Date().getFullYear() + 1);
+const CURRENT_YEAR = new Date().getFullYear();
+
+// Keywords that indicate a year is about a published edition
+const PUBLISH_RE = /\b(published|edition|released|confirmed|effective|issued|supersedes|current\s+version|current\s+edition)\b/i;
+// Keywords that indicate a year is about a future/planned event — skip these
+const REVIEW_RE  = /\b(review|planned|scheduled|revision|under\s+revision|next\s+review|upcoming|expected|will\s+be)\b/i;
+
+// Extract year from text, scoring by context.
+// Returns the best candidate year or null.
+function extractPublishedYear(text) {
+  const WINDOW = 90; // chars before/after the year to inspect
+  const candidates = [];
+
+  for (const m of text.matchAll(/\b(20\d{2})\b/g)) {
+    const y = parseInt(m[1]);
+    if (y < 2000 || y > CURRENT_YEAR) continue; // future years are not published editions
+
+    const start   = Math.max(0, m.index - WINDOW);
+    const end     = Math.min(text.length, m.index + m[0].length + WINDOW);
+    const context = text.slice(start, end);
+
+    if (REVIEW_RE.test(context)) continue;           // skip review/planned dates
+    const confidence = PUBLISH_RE.test(context) ? 2 : 1;
+    candidates.push({ year: y, confidence });
+  }
+
+  if (!candidates.length) return null;
+
+  // Prefer high-confidence hits; within same confidence tier pick the latest year
+  const best = candidates.reduce((a, b) =>
+    b.confidence > a.confidence || (b.confidence === a.confidence && b.year > a.year) ? b : a
+  );
+  return String(best.year);
 }
 
-function maxYearStr(years) {
+// For short snippets (title, h1) trust any year — it's almost certainly the edition year
+function extractYearSimple(text) {
+  const years = [...text.matchAll(/\b(20\d{2})\b/g)]
+    .map(m => parseInt(m[1]))
+    .filter(y => y >= 2000 && y <= CURRENT_YEAR);
   return years.length ? String(Math.max(...years)) : null;
 }
 
@@ -21,15 +54,13 @@ async function fetchSourceUrl(url) {
     const $ = cheerio.load(res.data);
     $('script, style, nav, footer').remove();
 
-    // Prioritise title/headings — most likely to contain the definitive version
     const priority = [
       $('title').text(),
       $('h1').first().text(),
       $('meta[name="description"]').attr('content') || '',
-      $('h2').first().text(),
     ].join(' ');
 
-    const body = $('body').text().slice(0, 4000);
+    const body = $('body').text().slice(0, 5000);
     return { priority, body };
   } catch (err) {
     console.warn(`[custom] source_url fetch failed (${url}): ${err.message}`);
@@ -49,8 +80,7 @@ async function searchGoogle(query) {
     });
     const items = [...(res.data.organic || []), ...(res.data.knowledgeGraph ? [res.data.knowledgeGraph] : [])];
     const text = items.map(i => `${i.title || ''} ${i.snippet || ''}`).join(' ');
-    const years = extractYears(text);
-    return maxYearStr(years);
+    return extractPublishedYear(text);
   } catch (err) {
     console.warn(`[custom] Serper query "${query}" failed: ${err.message}`);
     return null;
@@ -67,29 +97,26 @@ export async function checkCustomStandards(regs) {
     if (reg.source_url) {
       const page = await fetchSourceUrl(reg.source_url);
       if (page) {
-        const priorityYears = extractYears(page.priority);
-        const bodyYears     = extractYears(page.body);
-        const year = maxYearStr([...priorityYears, ...bodyYears]);
-        if (year) {
-          console.log(`[custom] ${reg.code} source_url → year ${year}`);
-          foundYear = year;
-        }
+        // Title/h1/meta — simple extraction (very likely the edition year)
+        const priorityYear = extractYearSimple(page.priority);
+        // Body — context-aware extraction to skip "next review" dates
+        const bodyYear = extractPublishedYear(page.body);
+
+        // Prefer priority; body is fallback
+        foundYear = priorityYear || bodyYear;
+        if (foundYear) console.log(`[custom] ${reg.code} source_url → year ${foundYear}`);
       }
     }
 
-    // Secondary: Google CSE — "<code> <title> current version"
-    const query = `"${reg.code}" "${reg.title}" current version OR latest edition`;
+    // Secondary: Serper/Google — context-aware year from snippets
+    const query = `"${reg.code}" current version OR latest edition`;
     const googleYear = await searchGoogle(query);
     if (googleYear) {
       console.log(`[custom] ${reg.code} Google → year ${googleYear}`);
-      if (!foundYear || parseInt(googleYear) > parseInt(foundYear)) {
-        foundYear = googleYear;
-      }
+      if (!foundYear || parseInt(googleYear) > parseInt(foundYear)) foundYear = googleYear;
     }
 
-    if (foundYear) {
-      results[reg.id] = { year: foundYear };
-    }
+    if (foundYear) results[reg.id] = { year: foundYear };
   }
 
   return results;
