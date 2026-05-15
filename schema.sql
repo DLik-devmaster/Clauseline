@@ -28,3 +28,5 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 CREATE INDEX IF NOT EXISTS alerts_reg_id_idx ON alerts(reg_id);
 CREATE INDEX IF NOT EXISTS alerts_created_idx ON alerts(created_at DESC);
+
+ALTER TABLE regulations ADD COLUMN IF NOT EXISTS source_url TEXT;

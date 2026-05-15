@@ -3,6 +3,7 @@ import { fetchMDCGVersions } from './sources/mdcg.js';
 import { fetchFDAUpdates } from './sources/fda.js';
 import { checkISOStandards } from './sources/iso.js';
 import { checkIECStandards } from './sources/iec.js';
+import { checkCustomStandards } from './sources/custom.js';
 
 // Extract the maximum 4-digit year from a version string like "2006+AMD1:2015"
 function maxYear(versionStr) {
@@ -201,15 +202,57 @@ async function runIECScan() {
   }
 }
 
+// ── Custom scanner (source_url + Google CSE) ──────────────────
+async function runCustomScan() {
+  console.log('[scanner] starting custom scan...');
+  const { rows: regs } = await pool.query(
+    `SELECT * FROM regulations WHERE source_url IS NOT NULL`
+  );
+  if (regs.length === 0) {
+    console.log('[scanner] no regs with source_url');
+    return;
+  }
+
+  let results;
+  try {
+    results = await checkCustomStandards(regs);
+  } catch (err) {
+    console.error('[scanner] custom scan failed:', err.message);
+    return;
+  }
+
+  for (const reg of regs) {
+    const found = results[reg.id];
+    if (!found) {
+      await pool.query(`UPDATE regulations SET last_checked=NOW() WHERE id=$1`, [reg.id]);
+      continue;
+    }
+
+    const storedYear = maxYear(reg.latest_version || reg.version);
+    if (found.year && storedYear && parseInt(found.year) > parseInt(storedYear)) {
+      console.log(`[scanner] custom update: ${reg.code} → ${found.year}`);
+      await updateRegulation(reg.id, found.year, 'outdated', 'minor');
+      await createAlert(
+        reg.id, reg.code, 'minor', 'new-version',
+        `${reg.code} updated — ${found.year}`,
+        `A newer version of ${reg.code} may be available (${found.year}). Verify at the official source and assess impact on your QMS.`
+      );
+    } else {
+      await pool.query(`UPDATE regulations SET last_checked=NOW() WHERE id=$1`, [reg.id]);
+    }
+  }
+}
+
 // ── Main scan entry point ─────────────────────────────────────
-export async function runScan(sources = ['mdcg', 'fda', 'iso', 'iec']) {
+export async function runScan(sources = ['mdcg', 'fda', 'iso', 'iec', 'custom']) {
   console.log(`[scanner] === scan started (${sources.join(', ')}) ===`);
   const t = Date.now();
 
-  if (sources.includes('mdcg')) await runMDCGScan();
-  if (sources.includes('fda'))  await runFDAScan();
-  if (sources.includes('iso'))  await runISOScan();
-  if (sources.includes('iec'))  await runIECScan();
+  if (sources.includes('mdcg'))   await runMDCGScan();
+  if (sources.includes('fda'))    await runFDAScan();
+  if (sources.includes('iso'))    await runISOScan();
+  if (sources.includes('iec'))    await runIECScan();
+  if (sources.includes('custom')) await runCustomScan();
 
   console.log(`[scanner] === scan done in ${((Date.now() - t) / 1000).toFixed(1)}s ===`);
 }

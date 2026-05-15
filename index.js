@@ -37,19 +37,20 @@ app.get('/api/regulations', async (req, res) => {
 });
 
 app.post('/api/regulations', async (req, res) => {
-  const { id, code, version, latest_version, title, body, category, status, severity, gap_score, changes } = req.body;
+  const { id, code, version, latest_version, title, body, category, status, severity, gap_score, changes, source_url } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO regulations (id, code, version, latest_version, title, body, category, status, severity, gap_score, changes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `INSERT INTO regulations (id, code, version, latest_version, title, body, category, status, severity, gap_score, changes, source_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        ON CONFLICT (id) DO UPDATE SET
          version=EXCLUDED.version, latest_version=EXCLUDED.latest_version,
          title=EXCLUDED.title, status=EXCLUDED.status,
          severity=EXCLUDED.severity, gap_score=EXCLUDED.gap_score,
-         changes=EXCLUDED.changes, last_checked=NOW()
+         changes=EXCLUDED.changes, source_url=EXCLUDED.source_url, last_checked=NOW()
        RETURNING *`,
       [id, code, version, latest_version || version, title, body, category || null,
-       status || 'up-to-date', severity || null, gap_score || 0, JSON.stringify(changes || [])]
+       status || 'up-to-date', severity || null, gap_score || 0, JSON.stringify(changes || []),
+       source_url || null]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -300,7 +301,7 @@ async function start() {
     console.log('[cron] weekly scan triggered');
     if (!scanRunning) {
       scanRunning = true;
-      runScan(['mdcg', 'fda']).finally(() => { scanRunning = false; });
+      runScan(['mdcg', 'fda', 'iso', 'iec', 'custom']).finally(() => { scanRunning = false; });
     }
   });
 
