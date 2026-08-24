@@ -149,8 +149,13 @@ app.delete('/api/regulations/:id', ...withAuth, async (req, res) => {
 });
 
 app.delete('/api/regulations', ...withAuth, async (req, res) => {
+  const { ids } = req.body || {};
   try {
-    await pool.query(`DELETE FROM regulations`);
+    if (Array.isArray(ids) && ids.length > 0) {
+      await pool.query(`DELETE FROM regulations WHERE id = ANY($1)`, [ids]);
+    } else {
+      await pool.query(`DELETE FROM regulations`);
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
