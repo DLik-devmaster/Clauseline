@@ -148,6 +148,15 @@ app.delete('/api/regulations/:id', ...withAuth, async (req, res) => {
   }
 });
 
+app.delete('/api/regulations', ...withAuth, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM regulations`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/regulations/:id/reset-assessment', ...withAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
